@@ -34,7 +34,7 @@ if __name__ == "__main__":
     agents.cli.run_app(
         agents.WorkerOptions(
             entrypoint_fnc=entrypoint,
-            url=f"ws://0.0.0.0:{LIVEKIT_PORT}",
+            ws_url=f"ws://0.0.0.0:{LIVEKIT_PORT}",
             api_key=os.environ["API_KEY"], 
             api_secret=os.environ["API_SECRET"]
         )
