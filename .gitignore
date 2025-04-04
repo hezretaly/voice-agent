@@ -1,5 +1,6 @@
 venv
 .env
+.env.local
 rmk
 agent1.py
 client.py
