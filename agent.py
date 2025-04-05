@@ -16,7 +16,7 @@ from livekit.plugins import (
     openai,
     deepgram,
     noise_cancellation,
-#    silero,
+    silero,
     turn_detector,
 )
 
