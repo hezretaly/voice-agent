@@ -205,17 +205,13 @@ class FunctionCallingLLM(llm_base.LLM):
                 yield ChoiceDelta(content="I'm still working on your previous request. Please wait a moment.")
             return LLMStream(_stream_wrapper())
 
-        # Pass ChatContext directly to base_llm.chat()
+        # Pass ChatContext as positional argument
         if self._tools:
-            try:
-                response = await self._base_llm.chat(history=history, tools=self._tools, tool_choice="auto")
-            except TypeError:
-                # If tools aren't supported, call without them and handle manually
-                response = await self._base_llm.chat(history=history)
+            response = await self._base_llm.chat(history, tools=self._tools, tool_choice="auto")
         else:
-            response = await self._base_llm.chat(history=history)
+            response = await self._base_llm.chat(history)
 
-        # Check for tool calls in the response
+        # Check for tool calls
         tool_calls = response.message.tool_calls if hasattr(response, 'message') and response.message.tool_calls else None
 
         if tool_calls and self._tools:
@@ -249,7 +245,7 @@ class FunctionCallingLLM(llm_base.LLM):
                     yield ChoiceDelta(content=f"Sorry, I don't have the capability to {function_name.replace('_', ' ')}.")
                 return LLMStream(_stream_no_func())
 
-        # Stream the response if no tool calls
+        # Stream the response
         async def _response_to_stream(resp: Choice):
             if resp.message.content:
                 yield ChoiceDelta(content=resp.message.content)
