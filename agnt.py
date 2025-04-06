@@ -14,8 +14,7 @@ from livekit.agents import (
     WorkerOptions,
     cli,
     metrics,
-    llm as llm_base,
-    VoicePipelineAgent
+    llm as llm_base
 )
 from livekit.agents.llm import LLMStream, LLMStreamChunk
 from livekit.agents.pipeline import VoicePipelineAgent
