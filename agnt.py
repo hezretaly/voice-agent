@@ -269,9 +269,19 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"starting voice assistant for participant {participant.identity}")
 
     base_llm = openai.LLM(model="gpt-4o-mini")
+    # Create the FunctionCallingLLM first
+    function_llm = FunctionCallingLLM(
+        base_llm=base_llm,
+        agent=None,  # We'll set this after, but pass llm during init
+        tools=TOOLS,
+        available_functions=available_functions
+    )
+    
+    # Pass function_llm to VoicePipelineAgent during initialization
     agent = VoicePipelineAgent(
         vad=ctx.proc.userdata["vad"],
         stt=deepgram.STT(model='nova-2'),
+        llm=function_llm, 
         tts=deepgram.TTS(model='aura-asteria-en'),
         turn_detector=turn_detector.EOUModel(),
         min_endpointing_delay=0.5,
@@ -279,14 +289,9 @@ async def entrypoint(ctx: JobContext):
         noise_cancellation=noise_cancellation.BVC(),
         chat_ctx=initial_ctx.copy(),
     )
-
-    function_llm = FunctionCallingLLM(
-        base_llm=base_llm,
-        agent=agent,
-        tools=TOOLS,
-        available_functions=available_functions
-    )
-    agent.llm = function_llm
+    
+    # Now set the agent reference in FunctionCallingLLM
+    function_llm._agent = agent  # Update the agent reference after creation
 
     usage_collector = metrics.UsageCollector()
     @agent.on("metrics_collected")
