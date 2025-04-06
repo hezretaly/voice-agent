@@ -16,7 +16,7 @@ from livekit.agents import (
     metrics,
     llm as llm_base
 )
-from livekit.agents.llm import LLMStream, LLMStreamChunk
+from livekit.agents.llm import LLMStream
 from livekit.agents.pipeline import VoicePipelineAgent
 from livekit.plugins import (
     openai,
@@ -162,14 +162,7 @@ TOOLS = [
 # --- Custom LLM Wrapper ---
 
 class FunctionCallingLLM(llm_base.LLM):
-    """
-    Wraps an LLM to add function calling, task management, and TTS feedback.
-    """
-    def __init__(self,
-                 base_llm: llm_base.LLM,
-                 agent: VoicePipelineAgent,
-                 tools: Optional[list] = None,
-                 available_functions: Optional[Dict[str, callable]] = None):
+    def __init__(self, base_llm: llm_base.LLM, agent: VoicePipelineAgent, tools: Optional[list] = None, available_functions: Optional[Dict[str, callable]] = None):
         super().__init__()
         self._base_llm = base_llm
         self._agent = agent
@@ -184,14 +177,11 @@ class FunctionCallingLLM(llm_base.LLM):
             func = self._available_functions.get(function_name)
             if not func:
                 raise ValueError(f"Function '{function_name}' is not available.")
-            
             update_task = asyncio.create_task(self._send_periodic_updates(task_id))
             self._tasks[task_id]["task_handle"] = update_task
-            
             logger.info(f"Executing tool function: {function_name}")
             result = await func(**arguments)
             logger.info(f"Tool function {function_name} completed")
-            
             if task_id in self._tasks and self._tasks[task_id]["status"] == "processing":
                 self._tasks[task_id]["status"] = "completed"
                 self._tasks[task_id]["result"] = result
@@ -282,15 +272,15 @@ class FunctionCallingLLM(llm_base.LLM):
     async def stream(self, history: llm_base.ChatContext, **kwargs) -> LLMStream:
         if self._active_task_id and self._tasks.get(self._active_task_id, {}).get("status") == "processing":
             async def _stream_wrapper():
-                yield LLMStreamChunk(choice_delta=llm_base.LLMChoiceDelta(content="I'm still working on your previous request. Please wait a moment."))
-            return LLMStream(stream=_stream_wrapper())
+                yield {"delta": {"content": "I'm still working on your previous request. Please wait a moment."}}
+            return LLMStream(_stream_wrapper())
 
         llm_response = await self.chat(history, **kwargs)
         async def _response_to_stream(resp: llm_base.LLMResponse):
             if resp.choices and resp.choices[0].message.content:
-                yield LLMStreamChunk(choice_delta=llm_base.LLMChoiceDelta(content=resp.choices[0].message.content))
+                yield {"delta": {"content": resp.choices[0].message.content}}
                 await asyncio.sleep(0)
-        return LLMStream(stream=_response_to_stream(llm_response))
+        return LLMStream(_response_to_stream(llm_response))
 
 # --- Entrypoint and Worker Setup ---
 
