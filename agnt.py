@@ -142,7 +142,7 @@ TOOLS = [
 # --- Custom LLM Wrapper ---
 
 class FunctionCallingLLM(llm_base.LLM):
-    def __init__(self, base_llm: llm_base.LLM, agent: VoicePipelineAgent, tools: Optional[list] = None, available_functions: Optional[Dict[str, callable]] = None):
+    def __init__(self, base_llm: llm_base.LLM, agent: Optional[VoicePipelineAgent] = None, tools: Optional[list] = None, available_functions: Optional[Dict[str, callable]] = None):
         super().__init__()
         self._base_llm = base_llm
         self._agent = agent
@@ -196,16 +196,22 @@ class FunctionCallingLLM(llm_base.LLM):
         except asyncio.CancelledError:
             logger.info(f"Periodic updates cancelled for task {task_id}.")
 
-    async def chat(self, history: llm_base.ChatContext, **kwargs) -> Choice:  # Return Choice instead of LLMResponse
+    async def chat(self, *, chat_ctx: llm_base.ChatContext = None, **kwargs) -> LLMStream:
+        # Delegate to stream method to ensure streaming output
+        return await self.stream(history=chat_ctx or llm_base.ChatContext(), **kwargs)
+
+    async def stream(self, history: llm_base.ChatContext, **kwargs) -> LLMStream:
         if self._active_task_id and self._tasks.get(self._active_task_id, {}).get("status") == "processing":
-            return Choice(message=ChatMessage(role="assistant", content="I'm still working on your previous request. Please wait a moment."))
+            async def _stream_wrapper():
+                yield ChoiceDelta(content="I'm still working on your previous request. Please wait a moment.")
+            return LLMStream(_stream_wrapper())
 
         if self._tools:
             kwargs['tools'] = self._tools
             kwargs['tool_choice'] = "auto"
 
+        # Call the base LLM's chat method
         llm_response = await self._base_llm.chat(history, **kwargs)
-        # Assume llm_response is a Choice or similar; adjust if base_llm returns differently
         tool_calls = llm_response.message.tool_calls if hasattr(llm_response, 'message') and llm_response.message.tool_calls else None
 
         if tool_calls:
@@ -214,7 +220,9 @@ class FunctionCallingLLM(llm_base.LLM):
             try:
                 arguments = json.loads(tool_call.function.arguments)
             except json.JSONDecodeError:
-                return Choice(message=ChatMessage(role="assistant", content=f"Sorry, I couldn't understand the details needed for {function_name}."))
+                async def _stream_error():
+                    yield ChoiceDelta(content=f"Sorry, I couldn't understand the details needed for {function_name}.")
+                return LLMStream(_stream_error())
 
             if function_name in self._available_functions:
                 task_id = f"task_{function_name}_{uuid.uuid4()}"
@@ -228,18 +236,16 @@ class FunctionCallingLLM(llm_base.LLM):
 
                 ack_message = f"Okay, I will {function_name.replace('_', ' ')} for you."
                 asyncio.create_task(self._execute_function_and_update_state(task_id, function_name, arguments))
-                return Choice(message=ChatMessage(role="assistant", content=ack_message))
+                
+                async def _stream_ack():
+                    yield ChoiceDelta(content=ack_message)
+                return LLMStream(_stream_ack())
             else:
-                return Choice(message=ChatMessage(role="assistant", content=f"Sorry, I don't have the capability to {function_name.replace('_', ' ')}."))
-        return llm_response  # Return the base LLM's response directly
+                async def _stream_no_func():
+                    yield ChoiceDelta(content=f"Sorry, I don't have the capability to {function_name.replace('_', ' ')}.")
+                return LLMStream(_stream_no_func())
 
-    async def stream(self, history: llm_base.ChatContext, **kwargs) -> LLMStream:
-        if self._active_task_id and self._tasks.get(self._active_task_id, {}).get("status") == "processing":
-            async def _stream_wrapper():
-                yield ChoiceDelta(content="I'm still working on your previous request. Please wait a moment.")
-            return LLMStream(_stream_wrapper())
-
-        llm_response = await self.chat(history, **kwargs)
+        # Stream the base LLM response if no tool call
         async def _response_to_stream(resp: Choice):
             if resp.message.content:
                 yield ChoiceDelta(content=resp.message.content)
