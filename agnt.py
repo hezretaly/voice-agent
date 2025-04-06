@@ -205,53 +205,51 @@ class FunctionCallingLLM(llm_base.LLM):
                 yield ChoiceDelta(content="I'm still working on your previous request. Please wait a moment.")
             return LLMStream(_stream_wrapper())
 
-        # Convert ChatContext to a list of messages for openai.LLM
-        messages = [
-            {"role": msg.role, "content": msg.content}
-            for msg in history.messages
-        ]
-
-        # If tools are available, include them and handle function calls manually
+        # Pass ChatContext directly to base_llm.chat()
         if self._tools:
-            response = await self._base_llm.chat(messages=messages, tools=self._tools, tool_choice="auto")
-            # Check if the response contains tool calls
-            tool_calls = response.message.tool_calls if hasattr(response, 'message') and response.message.tool_calls else None
-
-            if tool_calls:
-                tool_call = tool_calls[0]
-                function_name = tool_call.function.name
-                try:
-                    arguments = json.loads(tool_call.function.arguments)
-                except json.JSONDecodeError:
-                    async def _stream_error():
-                        yield ChoiceDelta(content=f"Sorry, I couldn't understand the details needed for {function_name}.")
-                    return LLMStream(_stream_error())
-
-                if function_name in self._available_functions:
-                    task_id = f"task_{function_name}_{uuid.uuid4()}"
-                    self._tasks[task_id] = {
-                        "status": "processing",
-                        "result": None,
-                        "function_name": function_name,
-                        "task_handle": None
-                    }
-                    self._active_task_id = task_id
-
-                    ack_message = f"Okay, I will {function_name.replace('_', ' ')} for you."
-                    asyncio.create_task(self._execute_function_and_update_state(task_id, function_name, arguments))
-                    
-                    async def _stream_ack():
-                        yield ChoiceDelta(content=ack_message)
-                    return LLMStream(_stream_ack())
-                else:
-                    async def _stream_no_func():
-                        yield ChoiceDelta(content=f"Sorry, I don't have the capability to {function_name.replace('_', ' ')}.")
-                    return LLMStream(_stream_no_func())
+            try:
+                response = await self._base_llm.chat(history=history, tools=self._tools, tool_choice="auto")
+            except TypeError:
+                # If tools aren't supported, call without them and handle manually
+                response = await self._base_llm.chat(history=history)
         else:
-            # No tools, just pass messages without tools kwargs
-            response = await self._base_llm.chat(messages=messages)
+            response = await self._base_llm.chat(history=history)
 
-        # Stream the response
+        # Check for tool calls in the response
+        tool_calls = response.message.tool_calls if hasattr(response, 'message') and response.message.tool_calls else None
+
+        if tool_calls and self._tools:
+            tool_call = tool_calls[0]
+            function_name = tool_call.function.name
+            try:
+                arguments = json.loads(tool_call.function.arguments)
+            except json.JSONDecodeError:
+                async def _stream_error():
+                    yield ChoiceDelta(content=f"Sorry, I couldn't understand the details needed for {function_name}.")
+                return LLMStream(_stream_error())
+
+            if function_name in self._available_functions:
+                task_id = f"task_{function_name}_{uuid.uuid4()}"
+                self._tasks[task_id] = {
+                    "status": "processing",
+                    "result": None,
+                    "function_name": function_name,
+                    "task_handle": None
+                }
+                self._active_task_id = task_id
+
+                ack_message = f"Okay, I will {function_name.replace('_', ' ')} for you."
+                asyncio.create_task(self._execute_function_and_update_state(task_id, function_name, arguments))
+                
+                async def _stream_ack():
+                    yield ChoiceDelta(content=ack_message)
+                return LLMStream(_stream_ack())
+            else:
+                async def _stream_no_func():
+                    yield ChoiceDelta(content=f"Sorry, I don't have the capability to {function_name.replace('_', ' ')}.")
+                return LLMStream(_stream_no_func())
+
+        # Stream the response if no tool calls
         async def _response_to_stream(resp: Choice):
             if resp.message.content:
                 yield ChoiceDelta(content=resp.message.content)
