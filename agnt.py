@@ -14,10 +14,10 @@ from livekit.agents import (
     WorkerOptions,
     cli,
     metrics,
-    llm as llm_base
+    llm as llm_base,
 )
-from livekit.agents.llm import LLMStream
 from livekit.agents.pipeline import VoicePipelineAgent
+from livekit.agents.llm import LLMStream, ChoiceDelta, ChatMessage, Choice
 from livekit.plugins import (
     openai,
     deepgram,
@@ -34,13 +34,10 @@ load_dotenv(dotenv_path=".env.local")
 # --- Tool Functions ---
 
 async def search_weather(location: str):
-    """Fetches current weather information using OpenWeatherMap API."""
     api_key = os.getenv("OPENWEATHER_API_KEY")
     if not api_key:
         raise ValueError("OpenWeatherMap API key not found")
-    
     url = f"http://api.openweathermap.org/data/2.5/weather?q={location}&appid={api_key}&units=metric"
-    
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
             if response.status != 200:
@@ -56,13 +53,10 @@ async def search_weather(location: str):
                 raise Exception("Invalid weather data received")
 
 async def internet_search(query: str):
-    """Performs an internet search using SerpStack API."""
     api_key = os.getenv("SERPSTACK_API_KEY")
     if not api_key:
         raise ValueError("SerpStack API key not found")
-    
     url = f"http://api.serpstack.com/search?access_key={api_key}&query={query}"
-    
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
             if response.status != 200:
@@ -83,13 +77,10 @@ async def internet_search(query: str):
                 raise Exception("Invalid search data received")
 
 async def send_to_n8n(message: str):
-    """Sends a message to an n8n workflow via a webhook."""
     webhook_url = os.getenv("N8N_WEBHOOK_URL")
     if not webhook_url:
         raise ValueError("n8n webhook URL not found")
-    
     payload = {"message": message}
-    
     async with aiohttp.ClientSession() as session:
         async with session.post(webhook_url, json=payload) as response:
             if response.status != 200:
@@ -97,14 +88,12 @@ async def send_to_n8n(message: str):
             print(f"[{time.strftime('%H:%M:%S')} TOOL DONE]: send_to_n8n with message '{message}'")
             return "Message sent to n8n successfully."
 
-# Mapping function names to the actual async functions
 available_functions = {
     "search_weather": search_weather,
     "internet_search": internet_search,
     "send_to_n8n": send_to_n8n,
 }
 
-# --- Define the Function Schema for the LLM ---
 TOOLS = [
     {
         "type": "function",
@@ -114,10 +103,7 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "location": {
-                        "type": "string",
-                        "description": "The city and state, e.g., San Francisco, CA",
-                    },
+                    "location": {"type": "string", "description": "The city and state, e.g., San Francisco, CA"},
                 },
                 "required": ["location"],
             },
@@ -131,10 +117,7 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The search query",
-                    },
+                    "query": {"type": "string", "description": "The search query"},
                 },
                 "required": ["query"],
             },
@@ -148,10 +131,7 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "message": {
-                        "type": "string",
-                        "description": "The message to send",
-                    },
+                    "message": {"type": "string", "description": "The message to send"},
                 },
                 "required": ["message"],
             },
@@ -216,20 +196,17 @@ class FunctionCallingLLM(llm_base.LLM):
         except asyncio.CancelledError:
             logger.info(f"Periodic updates cancelled for task {task_id}.")
 
-    async def chat(self, history: llm_base.ChatContext, **kwargs) -> llm_base.LLMResponse:
+    async def chat(self, history: llm_base.ChatContext, **kwargs) -> Choice:  # Return Choice instead of LLMResponse
         if self._active_task_id and self._tasks.get(self._active_task_id, {}).get("status") == "processing":
-            response = llm_base.LLMResponse()
-            response.choices.append(llm_base.LLMChoice(
-                message=llm_base.ChatMessage(role="assistant", content="I'm still working on your previous request. Please wait a moment.")
-            ))
-            return response
+            return Choice(message=ChatMessage(role="assistant", content="I'm still working on your previous request. Please wait a moment."))
 
         if self._tools:
             kwargs['tools'] = self._tools
             kwargs['tool_choice'] = "auto"
 
         llm_response = await self._base_llm.chat(history, **kwargs)
-        tool_calls = llm_response.choices[0].message.tool_calls if llm_response.choices and llm_response.choices[0].message.tool_calls else None
+        # Assume llm_response is a Choice or similar; adjust if base_llm returns differently
+        tool_calls = llm_response.message.tool_calls if hasattr(llm_response, 'message') and llm_response.message.tool_calls else None
 
         if tool_calls:
             tool_call = tool_calls[0]
@@ -237,11 +214,7 @@ class FunctionCallingLLM(llm_base.LLM):
             try:
                 arguments = json.loads(tool_call.function.arguments)
             except json.JSONDecodeError:
-                response = llm_base.LLMResponse()
-                response.choices.append(llm_base.LLMChoice(
-                    message=llm_base.ChatMessage(role="assistant", content=f"Sorry, I couldn't understand the details needed for {function_name}.")
-                ))
-                return response
+                return Choice(message=ChatMessage(role="assistant", content=f"Sorry, I couldn't understand the details needed for {function_name}."))
 
             if function_name in self._available_functions:
                 task_id = f"task_{function_name}_{uuid.uuid4()}"
@@ -254,31 +227,22 @@ class FunctionCallingLLM(llm_base.LLM):
                 self._active_task_id = task_id
 
                 ack_message = f"Okay, I will {function_name.replace('_', ' ')} for you."
-                response = llm_base.LLMResponse()
-                response.choices.append(llm_base.LLMChoice(
-                    message=llm_base.ChatMessage(role="assistant", content=ack_message)
-                ))
-
                 asyncio.create_task(self._execute_function_and_update_state(task_id, function_name, arguments))
-                return response
+                return Choice(message=ChatMessage(role="assistant", content=ack_message))
             else:
-                response = llm_base.LLMResponse()
-                response.choices.append(llm_base.LLMChoice(
-                    message=llm_base.ChatMessage(role="assistant", content=f"Sorry, I don't have the capability to {function_name.replace('_', ' ')}.")
-                ))
-                return response
-        return llm_response
+                return Choice(message=ChatMessage(role="assistant", content=f"Sorry, I don't have the capability to {function_name.replace('_', ' ')}."))
+        return llm_response  # Return the base LLM's response directly
 
     async def stream(self, history: llm_base.ChatContext, **kwargs) -> LLMStream:
         if self._active_task_id and self._tasks.get(self._active_task_id, {}).get("status") == "processing":
             async def _stream_wrapper():
-                yield {"delta": {"content": "I'm still working on your previous request. Please wait a moment."}}
+                yield ChoiceDelta(content="I'm still working on your previous request. Please wait a moment.")
             return LLMStream(_stream_wrapper())
 
         llm_response = await self.chat(history, **kwargs)
-        async def _response_to_stream(resp: llm_base.LLMResponse):
-            if resp.choices and resp.choices[0].message.content:
-                yield {"delta": {"content": resp.choices[0].message.content}}
+        async def _response_to_stream(resp: Choice):
+            if resp.message.content:
+                yield ChoiceDelta(content=resp.message.content)
                 await asyncio.sleep(0)
         return LLMStream(_response_to_stream(llm_response))
 
