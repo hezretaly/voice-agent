@@ -24,7 +24,7 @@ from livekit.plugins import deepgram, openai, silero, turn_detector
 
 logger = logging.getLogger("basic-agent")
 
-load_dotenv()
+load_dotenv(dotenv_path=".env.local")
 
 
 class MyAgent(Agent):
@@ -78,7 +78,7 @@ async def entrypoint(ctx: JobContext):
     # each log entry will include these fields
     ctx.log_context_fields = {
         "room": ctx.room.name,
-        "user_id": "your user_id",
+        "user_id": "user_id",
     }
     await ctx.connect()
 
