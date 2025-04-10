@@ -16,7 +16,8 @@ from livekit.agents import (
 )
 from livekit.agents.llm import function_tool
 from livekit.agents.voice import MetricsCollectedEvent
-from livekit.plugins import deepgram, openai, silero, turn_detector
+from livekit.plugins import deepgram, openai, silero
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 # uncomment to enable Krisp background voice/noise cancellation
 # currently supported on Linux and MacOS
@@ -89,7 +90,7 @@ async def entrypoint(ctx: JobContext):
         stt=deepgram.STT(model="nova-2"),
         tts=deepgram.TTS(model="aura-asteria-en"),
         # use LiveKit's turn detection model
-        turn_detection=turn_detector.EOUModel(),
+        turn_detection=MultilingualModel(),
     )
 
     # log metrics as they are emitted, and total usage after session is over
