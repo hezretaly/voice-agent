@@ -1,4 +1,6 @@
 import logging
+import requests
+import os
 
 from dotenv import load_dotenv
 
@@ -64,11 +66,16 @@ class MyAgent(Agent):
 
         logger.info(f"Looking up weather for {location}")
 
-        return {
-            "weather": "sunny",
-            "temperature": 70,
-            "location": location,
-        }
+        response = requests.post(os.environ.get("N8N_WEBHOOK_URL"), json={"location": location}, timeout=5)
+
+        if response.status_code == 200:
+            return {
+                response.json()
+            }
+        else:
+            return {
+                "response": "Some error happened"
+            }
 
 
 def prewarm(proc: JobProcess):
