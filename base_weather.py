@@ -69,9 +69,7 @@ class MyAgent(Agent):
         response = requests.post(os.environ.get("N8N_WEBHOOK_URL"), json={"location": location}, timeout=5)
 
         if response.status_code == 200:
-            return {
-                response.json()
-            }
+            return response.json()
         else:
             return {
                 "response": "Some error happened"
