@@ -74,6 +74,33 @@ class MyAgent(Agent):
             return {
                 "response": "Some error happened"
             }
+        
+    # agent tool
+    @function_tool
+    async def agent_request(
+        self,
+        context: RunContext,
+        query: str,
+    ):
+        """Called when the user asks to send email or slack message or telegram message.
+        Ensure the user specifies what the message or email to be sent.
+        This agent is responsible for sending emails, slack and telegram messages so make the querry clear enough for agent to know what to send and whoom to send it.
+
+        Args:
+            query: The querry for the agent to process.
+        """
+
+        logger.info(f"Qerrying agent for {query}")
+
+        response = requests.post(os.environ.get("N8N_WEBHOOK_URL"), json={"query": query}, timeout=5)
+
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return {
+                "response": "Some error happened"
+            }
+
 
 
 def prewarm(proc: JobProcess):
