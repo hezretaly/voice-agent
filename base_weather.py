@@ -92,7 +92,7 @@ class MyAgent(Agent):
 
         logger.info(f"Qerrying agent for {query}")
 
-        response = requests.post(os.environ.get("N8N_WEBHOOK_URL"), json={"query": query}, timeout=5)
+        response = requests.post(os.environ.get("N8N_WEBHOOK_URL_SEYD"), json={"query": query}, timeout=10)
 
         if response.status_code == 200:
             return response.json()
