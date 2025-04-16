@@ -121,7 +121,7 @@ async def entrypoint(ctx: JobContext):
         llm=openai.LLM(model="gpt-4o-mini"),
         stt=deepgram.STT(model="nova-2"),
         # tts=deepgram.TTS(model="aura-asteria-en"),
-        tts=cartesia.TTS(),
+        tts=openai.TTS(model="gpt-4o-mini-tts"),
         # use LiveKit's turn detection model
         turn_detection=MultilingualModel(),
     )
